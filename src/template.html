@@ -136,6 +136,7 @@ input[type=text]:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 
 .gnum{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
 .gcard.done .gnum{color:var(--ok)}
 .grange{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.gname{font-weight:700;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
 .gprev{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gtags{display:flex;gap:4px;flex-wrap:wrap;margin-top:auto}
 .tag{font-size:12px;padding:1px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-weight:600}
@@ -153,6 +154,7 @@ input[type=text]:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 
 .pos{font-size:12.5px;color:var(--muted);font-style:italic}
 .zh{font-size:15px}
 .def{font-size:13px;color:var(--muted)}
+.note{font-size:12px;color:var(--accent);margin-top:2px}
 .rank{font-size:12px;color:var(--muted);padding-top:9px;font-variant-numeric:tabular-nums}
 .rbody.mask .zh,.rbody.mask .def{filter:blur(6px);user-select:none;cursor:pointer;transition:filter .15s}
 .rbody.mask.shown .zh,.rbody.mask.shown .def{filter:none}
@@ -195,6 +197,7 @@ h3{font-size:16px}
 .c-zh{font-size:clamp(22px,5vw,30px);font-weight:700}
 .c-zh.big{font-size:clamp(26px,7vw,40px)}
 .c-def{color:var(--muted);max-width:560px;font-size:15px}
+.c-note{color:var(--accent);font-size:13px;max-width:560px}
 .hint{position:absolute;bottom:12px;left:0;right:0;font-size:13px;color:var(--muted)}
 .card-star{position:absolute;top:14px;right:16px;color:var(--star);font-size:12px;display:flex;align-items:center;gap:3px;font-weight:600}
 .card-star path{fill:currentColor}
@@ -287,6 +290,22 @@ h3{font-size:16px}
 .keys dt{font-weight:600}
 .keys dd{margin:0;color:var(--muted)}
 .foot{font-size:12.5px;color:var(--muted);margin-top:24px;line-height:1.6}
+
+/* cloud sync */
+.sync-line{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted);flex-wrap:wrap}
+.sync-line a{font-weight:600}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.sync-dot.synced{background:var(--ok)}
+.sync-dot.syncing,.sync-dot.loading{background:var(--accent);animation:blink 1s ease-in-out infinite}
+.sync-dot.offline,.sync-dot.signedOut{background:var(--star)}
+.sync-dot.error{background:var(--bad)}
+@keyframes blink{50%{opacity:.3}}
+.sync-user{display:flex;align-items:center;gap:10px;margin-bottom:8px;min-width:0}
+.sync-user img{width:36px;height:36px;border-radius:50%;flex:none}
+.sync-user div{min-width:0;overflow-wrap:anywhere}
+.sync-err{color:var(--bad);font-size:14px;margin:8px 0 0}
+.btn.google{background:var(--surface);border-color:var(--line);gap:10px}
+.btn.google svg{width:18px;height:18px}
 
 @media (max-width:560px){
   .brand .bank-name{display:none}
@@ -390,8 +409,13 @@ function loadCustom(){
 }
 let S = loadState();
 let CUSTOM = loadCustom();
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
-function saveCustom(){ try { localStorage.setItem(BKEY, JSON.stringify(CUSTOM)); return true; } catch (e) { return false; } }
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} Sync.touch('state'); }
+function saveCustom(){
+  let ok = true;
+  try { localStorage.setItem(BKEY, JSON.stringify(CUSTOM)); } catch (e) { ok = false; }
+  if (ok) Sync.touch('banks');
+  return ok;
+}
 const allBanks = () => [...BUILTIN.map(b => Object.assign({builtin:true}, b)), ...CUSTOM];
 
 /* ---------- 目前使用的單字庫 ---------- */
@@ -406,9 +430,16 @@ let reviewGroup = 0;
 function useBank(id){
   const def = allBanks().find(b => b.id === id) || allBanks()[0];
   const size = def.size || 50;
-  WORDS = def.words.map((r, i) => ({id:i + 1, w:String(r[0]), pos:r[1] || '', zh:r[2] || '', def:r[3] || '', g:Math.floor(i / size) + 1}));
+  // 有 groups 的單字庫依主題分組，否則每 size 個字一組
+  const named = Array.isArray(def.groups) && def.groups.length ? def.groups : null;
+  const gOf = [];
+  if (named) named.forEach((g, gi) => { for (let k = 0; k < g.n; k++) gOf.push(gi + 1); });
+  // 內建單字庫可以提供固定編號（ids），之後在中間插入新字也不會讓進度錯位
+  const ids = Array.isArray(def.ids) && def.ids.length === def.words.length ? def.ids : null;
+  WORDS = def.words.map((r, i) => ({id:ids ? ids[i] : i + 1, w:String(r[0]), pos:r[1] || '', zh:r[2] || '', def:r[3] || '', note:r[4] || '',
+                                    g:named ? (gOf[i] || named.length) : Math.floor(i / size) + 1}));
   BY_ID = new Map(WORDS.map(x => [x.id, x]));
-  NG = Math.ceil(WORDS.length / size);
+  NG = named ? named.length : Math.ceil(WORDS.length / size);
   GW = Array.from({length:NG + 1}, () => []);
   WORDS.forEach(w => GW[w.g].push(w));
   POS_POOL = {}; POS_EXACT = {};
@@ -417,7 +448,8 @@ function useBank(id){
     (POS_POOL[p] = POS_POOL[p] || []).push(w);
     (POS_EXACT[w.pos] = POS_EXACT[w.pos] || []).push(w);
   });
-  B = {id:def.id, name:def.name, size, builtin:!!def.builtin, source:def.source || '', credit:def.credit || ''};
+  B = {id:def.id, name:def.name, size, builtin:!!def.builtin, source:def.source || '', credit:def.credit || '',
+       gnames:named ? [''].concat(named.map(g => g.name)) : null};
   S.cur = def.id;
   P = S.banks[def.id] = Object.assign(bankDefaults(), S.banks[def.id] || {});
   P.qsGroups = (P.qsGroups || []).filter(g => g >= 1 && g <= NG);
@@ -425,6 +457,10 @@ function useBank(id){
   const bb = $('#brandBank'); if (bb) bb.textContent = B.name;
 }
 
+// 組別名稱：依主題分組的單字庫顯示主題名，其他顯示「第 N 組」
+const gName = g => B.gnames ? B.gnames[g] : `第 ${g} 組`;
+const gTag = g => B.gnames ? B.gnames[g] : `第${pad(g)}組`;
+const unitWord = () => B.gnames ? '個術語' : '字';
 const isStar = id => !!P.star[id];
 const starIds = () => Object.keys(P.star).map(Number).filter(id => BY_ID.has(id)).sort((a, b) => a - b);
 function markWrong(id){ P.star[id] = Date.now(); P.miss[id] = (P.miss[id] || 0) + 1; }
@@ -517,6 +553,333 @@ if (TTS.ok) {
   document.addEventListener('click', unlock, true);
 }
 
+/* ---------- 雲端同步（Firebase） ---------- */
+/* SYNC-CORE-START */
+// 兩台裝置都改過同一個單字庫的進度時，把兩邊合併（不熟標記取聯集、次數取最大）
+function mergeProgress(a, b){
+  a = a || {}; b = b || {};
+  const maxMap = (x, y) => { const o = Object.assign({}, x || {}); for (const k in (y || {})) o[k] = Math.max(o[k] || 0, y[k] || 0); return o; };
+  const out = Object.assign({}, a, b);
+  out.star = maxMap(a.star, b.star);
+  out.miss = maxMap(a.miss, b.miss);
+  out.rv = maxMap(a.rv, b.rv);
+  out.done = maxMap(a.done, b.done);
+  out.last = Object.assign({}, a.last || {}, b.last || {});
+  const seen = new Set();
+  out.hist = [...(b.hist || []), ...(a.hist || [])]
+    .filter(h => h && h.t && !seen.has(h.t) && seen.add(h.t))
+    .sort((x, y) => y.t - x.t).slice(0, 100);
+  out.dailyLog = Object.assign({}, a.dailyLog || {}, b.dailyLog || {});
+  const da = a.daily, db = b.daily;
+  if (da && db && da.date === db.date) {
+    out.daily = {date:da.date, ids:[...new Set([...(db.ids || []), ...(da.ids || [])])], done:[...new Set([...(db.done || []), ...(da.done || [])])]};
+  } else {
+    out.daily = (!da ? db : !db ? da : (da.date > db.date ? da : db)) || null;
+  }
+  return out;
+}
+// 決定一個資料單位要上傳、下載還是合併
+// localJson：本機內容（null = 沒有或已刪除）；localUpdated：本機最後修改時間；synced：上次同步時的版本
+// remote：雲端文件 {json, updated, deleted}，沒有則為 null
+function decideSync(localJson, localUpdated, synced, remote){
+  synced = synced || 0; localUpdated = localUpdated || 0;
+  if (!remote) return localJson != null ? 'push' : 'none';
+  const rJson = remote.deleted ? null : remote.json;
+  if (rJson === localJson) return 'same';
+  if (remote.updated === localUpdated) return 'same';
+  const localChanged = localUpdated > synced;
+  const remoteChanged = remote.updated > synced;
+  if (remoteChanged && !localChanged) return 'pull';
+  if (localChanged && !remoteChanged) return 'push';
+  if (!localChanged && !remoteChanged) return 'none';
+  return 'merge';
+}
+// 衝突時的結果：刪除優先；進度合併；設定與單字庫內容以雲端為準
+function resolveConflict(key, localJson, remote){
+  const rJson = remote.deleted ? null : remote.json;
+  if ((key.startsWith('p_') || key.startsWith('b_')) && (localJson == null || rJson == null)) return null;
+  if (key.startsWith('p_')) return JSON.stringify(mergeProgress(JSON.parse(localJson), JSON.parse(rJson)));
+  return rJson;
+}
+function hashStr(s){ let h = 5381; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0; return (h >>> 0) || 1; }
+/* SYNC-CORE-END */
+
+const FB_CONFIG = /*__FIREBASE__*/null;
+const FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
+const SITE_URL = 'https://donna12301230.github.io/vocab-trainer/';
+const SYNC_KEY = 'vocab-sync-v1';
+const IC_CLOUD = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.34 9.5 4.75 4.75 0 0 0 6.75 19z"/></svg>';
+const IC_GOOGLE = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>';
+
+function localUnits(scope){
+  const m = {};
+  if (scope !== 'banks') {
+    m.settings = JSON.stringify({set:S.set, cur:S.cur});
+    for (const id in S.banks) m['p_' + id] = JSON.stringify(S.banks[id]);
+  }
+  if (scope !== 'state') for (const b of CUSTOM) m['b_' + b.id] = JSON.stringify(b);
+  return m;
+}
+function loadScript(src){
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+}
+function authErrorText(e){
+  const c = e && e.code;
+  if (c === 'auth/unauthorized-domain') return '這個網址還不能登入（需要在 Firebase 加入已授權網域）。';
+  if (c === 'auth/operation-not-allowed' || c === 'auth/configuration-not-found') return 'Firebase 還沒開啟 Google 登入。';
+  if (c === 'auth/network-request-failed') return '網路連線失敗，請確認有連上網路再試一次。';
+  if (c === 'auth/too-many-requests') return '嘗試太多次了，請稍後再試。';
+  return (e && e.message) || String(e);
+}
+
+const Sync = {
+  avail: !!FB_CONFIG && /^https?:$/.test(location.protocol),
+  loading: false, user: null, auth: null, db: null, unsub: null, ready: false,
+  meta: {uid:'', units:{}, synced:{}, hash:{}, lastSync:0},
+  snap: {}, scopes: new Set(), timer: 0, pushTimer: 0, pending: 0, err: '', pendingRefresh: false,
+
+  loadMeta(){
+    try { const m = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); if (m && typeof m === 'object') this.meta = Object.assign(this.meta, m); } catch (e) {}
+    ['units', 'synced', 'hash'].forEach(k => { if (!this.meta[k] || typeof this.meta[k] !== 'object') this.meta[k] = {}; });
+  },
+  saveMeta(){ try { localStorage.setItem(SYNC_KEY, JSON.stringify(this.meta)); } catch (e) {} },
+  bump(k){ this.meta.units[k] = Math.max(Date.now(), (this.meta.units[k] || 0) + 1, (this.meta.synced[k] || 0) + 1); },
+  setSnap(k, json){ this.snap[k] = json; this.meta.hash[k] = json == null ? 0 : hashStr(json); },
+
+  // 開頁時：找出上次關閉前還沒記錄到的變更
+  initLocal(){
+    if (!this.avail) return;
+    this.loadMeta();
+    const cur = localUnits('all');
+    for (const k in cur) if (this.meta.hash[k] !== hashStr(cur[k])) { this.bump(k); this.setSnap(k, cur[k]); } else this.snap[k] = cur[k];
+    for (const k in this.meta.hash) if (!(k in cur)) { if (this.meta.hash[k]) this.bump(k); this.setSnap(k, null); }
+    this.saveMeta();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.flushLocal(); });
+  },
+  touch(scope){
+    if (!this.avail) return;
+    this.scopes.add(scope);
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.flushLocal(), 600);
+  },
+  flushLocal(){
+    clearTimeout(this.timer);
+    if (!this.scopes.size) return;
+    const sc = this.scopes; this.scopes = new Set();
+    const scope = sc.has('banks') && sc.has('state') ? 'all' : sc.has('banks') ? 'banks' : 'state';
+    const cur = localUnits(scope);
+    let changed = false;
+    for (const k in cur) if (cur[k] !== this.snap[k]) { this.setSnap(k, cur[k]); this.bump(k); changed = true; }
+    for (const k in this.snap) {
+      if (this.snap[k] == null || k in cur) continue;
+      const inScope = scope === 'all' || (scope === 'banks' ? k.startsWith('b_') : !k.startsWith('b_'));
+      if (inScope) { this.setSnap(k, null); this.bump(k); changed = true; }
+    }
+    if (changed) { this.saveMeta(); this.schedulePush(); }
+  },
+  schedulePush(){
+    if (!this.ready) return;
+    clearTimeout(this.pushTimer);
+    this.pushTimer = setTimeout(() => this.pushDirty(), 800);
+  },
+  pushDirty(){
+    const keys = Object.keys(this.meta.units).filter(k => (this.meta.units[k] || 0) > (this.meta.synced[k] || 0) && k in this.snap);
+    if (keys.length) this.pushKeys(keys);
+  },
+  async pushKeys(keys){
+    if (!this.user || !this.db) return;
+    const col = this.db.collection('users').doc(this.user.uid).collection('units');
+    const batch = this.db.batch(), vers = {};
+    for (const k of keys) {
+      const json = this.snap[k];
+      if (!this.meta.units[k]) this.bump(k);
+      const updated = this.meta.units[k];
+      if (json != null && json.length > 900000) { this.err = '有一個單字庫太大，無法同步（請拆成較小的單字庫）。'; continue; }
+      batch.set(col.doc(k), json == null ? {deleted:true, updated} : {json, updated});
+      vers[k] = updated;
+    }
+    if (!Object.keys(vers).length) { this.paint(); return; }
+    this.pending++; this.paint();
+    try {
+      await batch.commit();
+      for (const k in vers) this.meta.synced[k] = Math.max(this.meta.synced[k] || 0, vers[k]);
+      this.meta.lastSync = Date.now(); this.err = '';
+      this.saveMeta();
+    } catch (e) {
+      this.err = '同步失敗：' + ((e && e.message) || e);
+    } finally {
+      this.pending--; this.paint();
+    }
+  },
+  onSnap(qs){
+    if (qs.metadata.fromCache && !this.ready) return;
+    const remote = {};
+    qs.forEach(d => { if (!d.metadata.hasPendingWrites) remote[d.id] = d.data(); });
+    const toPush = [];
+    let changed = false;
+    for (const k in remote) {
+      const r = remote[k];
+      if (!r || typeof r.updated !== 'number') continue;
+      const lj = this.snap[k] == null ? null : this.snap[k];
+      const act = decideSync(lj, this.meta.units[k], this.meta.synced[k], r);
+      if (act === 'same') {
+        this.meta.synced[k] = Math.max(this.meta.synced[k] || 0, r.updated);
+        if ((this.meta.units[k] || 0) < r.updated) this.meta.units[k] = r.updated;
+      } else if (act === 'pull') {
+        const json = r.deleted ? null : r.json;
+        this.applyUnit(k, json); this.setSnap(k, json);
+        this.meta.units[k] = this.meta.synced[k] = r.updated;
+        changed = true;
+      } else if (act === 'push') {
+        toPush.push(k);
+      } else if (act === 'merge') {
+        const json = resolveConflict(k, lj, r);
+        this.applyUnit(k, json); this.setSnap(k, json);
+        this.meta.synced[k] = r.updated; this.bump(k);
+        toPush.push(k); changed = true;
+      }
+    }
+    if (!this.ready) {
+      // 第一次連上：本機有、雲端還沒有的資料也上傳
+      for (const k in this.snap) if (!(k in remote) && this.snap[k] != null) toPush.push(k);
+      this.ready = true;
+    }
+    if (changed) this.afterRemote();
+    this.saveMeta();
+    if (toPush.length) this.pushKeys([...new Set(toPush)]);
+    this.paint(!changed && toPush.length === 0);
+  },
+  applyUnit(k, json){
+    if (k === 'settings') {
+      if (json) { const o = JSON.parse(json); S.set = Object.assign(defaults().set, o.set || {}); if (o.cur) S.cur = o.cur; }
+      return;
+    }
+    const id = k.slice(2);
+    if (k.startsWith('p_')) { if (json == null) delete S.banks[id]; else S.banks[id] = JSON.parse(json); return; }
+    if (k.startsWith('b_')) {
+      const i = CUSTOM.findIndex(b => b.id === id);
+      if (json == null) { if (i >= 0) CUSTOM.splice(i, 1); }
+      else { const b = JSON.parse(json); if (i >= 0) CUSTOM[i] = b; else CUSTOM.push(b); }
+    }
+  },
+  // 套用雲端的變更：直接寫回本機儲存（不觸發上傳），再更新畫面
+  afterRemote(){
+    try { localStorage.setItem(KEY, JSON.stringify(S)); localStorage.setItem(BKEY, JSON.stringify(CUSTOM)); } catch (e) {}
+    const exists = allBanks().some(b => b.id === S.cur);
+    if (session) {
+      // 正在背單字或考試：先不換畫面，結束後再更新
+      if (S.banks[B.id]) P = S.banks[B.id] = Object.assign(bankDefaults(), S.banks[B.id]);
+      else S.banks[B.id] = P;
+      this.pendingRefresh = true;
+      updateCounts();
+    } else {
+      useBank(exists ? S.cur : BUILTIN[0].id);
+      render();
+    }
+  },
+
+  async init(){
+    if (!this.avail) return;
+    this.loading = true; this.paint();
+    try {
+      await loadScript(FB_SDK + 'firebase-app-compat.js');
+      await Promise.all([loadScript(FB_SDK + 'firebase-auth-compat.js'), loadScript(FB_SDK + 'firebase-firestore-compat.js')]);
+    } catch (e) {
+      this.loading = false; this.err = '無法載入雲端同步元件，請確認網路連線後重新整理頁面。'; this.paint(true); return;
+    }
+    firebase.initializeApp(FB_CONFIG);
+    this.auth = firebase.auth();
+    this.db = firebase.firestore();
+    this.auth.getRedirectResult().catch(e => { this.err = authErrorText(e); this.paint(true); });
+    this.auth.onAuthStateChanged(u => this.onUser(u));
+    window.addEventListener('online', () => this.paint());
+    window.addEventListener('offline', () => this.paint());
+  },
+  onUser(u){
+    this.loading = false;
+    if (this.unsub) { this.unsub(); this.unsub = null; }
+    this.user = u; this.ready = false;
+    if (u) {
+      if (this.meta.uid !== u.uid) { this.meta.uid = u.uid; this.meta.synced = {}; this.saveMeta(); }
+      this.err = '';
+      this.flushLocal();
+      this.unsub = this.db.collection('users').doc(u.uid).collection('units')
+        .onSnapshot(qs => this.onSnap(qs), e => { this.err = '同步失敗：' + ((e && e.message) || e); this.paint(); });
+    }
+    this.paint(true);
+  },
+  async signIn(){
+    if (!this.auth) return;
+    const p = new firebase.auth.GoogleAuthProvider();
+    p.setCustomParameters({prompt:'select_account'});
+    this.err = '';
+    try { await this.auth.signInWithPopup(p); }
+    catch (e) {
+      if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(e.code)) {
+        try { await this.auth.signInWithRedirect(p); } catch (e2) { this.err = authErrorText(e2); this.paint(true); }
+      } else if (!['auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/user-cancelled'].includes(e.code)) {
+        this.err = authErrorText(e); this.paint(true);
+      }
+    }
+  },
+  signOut(){
+    if (!this.auth || !confirm('登出後，這台裝置上的進度會保留，但不會再同步。確定要登出嗎？')) return;
+    this.auth.signOut();
+  },
+  syncNow(){ this.flushLocal(); this.pushDirty(); this.paint(); },
+
+  status(){
+    if (!this.avail) return 'off';
+    if (this.loading) return 'loading';
+    if (!this.user) return this.err ? 'error' : 'signedOut';
+    if (!navigator.onLine) return 'offline';
+    if (this.err) return 'error';
+    if (!this.ready || this.pending) return 'syncing';
+    return 'synced';
+  },
+  statusText(){
+    return {off:'沒有雲端同步', loading:'正在連線雲端…', signedOut:'尚未登入，進度只存在這台裝置', syncing:'同步中…',
+            synced:'已同步', offline:'離線中，連上網路後會自動同步', error:'同步出了問題'}[this.status()];
+  },
+  // full = true 時重畫首頁或設定頁（登入狀態改變時）；否則只更新狀態文字
+  paint(full){
+    const st = this.status();
+    document.querySelectorAll('[data-sync-dot]').forEach(el => { el.className = 'sync-dot ' + st; });
+    document.querySelectorAll('[data-sync-text]').forEach(el => { el.textContent = this.statusText(); });
+    document.querySelectorAll('[data-sync-time]').forEach(el => { el.textContent = this.meta.lastSync ? '最後同步：' + fmtDate(this.meta.lastSync) : ''; });
+    const a = route().a;
+    if (full && (a === 'home' || a === 'settings' || a === 'banks')) render();
+  }
+};
+function syncLineHtml(){
+  if (!Sync.avail) return '';
+  const st = Sync.status();
+  const tail = Sync.user ? `<span>・${esc(Sync.user.email || Sync.user.displayName || '')}</span>`
+    : st === 'loading' ? '' : '<a href="#/settings">用 Google 登入同步</a>';
+  return `<div class="sync-line">${IC_CLOUD}<span class="sync-dot ${st}" data-sync-dot></span><span data-sync-text>${Sync.statusText()}</span>${tail}${st === 'error' ? '<a href="#/settings">查看</a>' : ''}</div>`;
+}
+function syncPanelHtml(){
+  if (!FB_CONFIG) return '';
+  if (!Sync.avail) {
+    return `<section class="panel"><h3>雲端同步</h3><p class="muted small" style="margin:0">這份是電腦上的單機版，沒有雲端同步。要讓手機和電腦同步，請改用網站版：<a href="${SITE_URL}" target="_blank" rel="noopener">${SITE_URL}</a></p></section>`;
+  }
+  const st = Sync.status();
+  const u = Sync.user;
+  const err = Sync.err ? `<p class="sync-err">${esc(Sync.err)}</p>` : '';
+  if (!u) {
+    return `<section class="panel"><h3>雲端同步</h3>
+      <p class="muted small" style="margin-top:0">用 Google 帳號登入後，手機和電腦的進度、自己新增的單字庫會自動同步，換手機或清除瀏覽器資料也不會不見。資料只有你自己的帳號能讀取。</p>
+      <button class="btn google" data-act="sync-login"${st === 'loading' ? ' disabled' : ''}>${IC_GOOGLE} ${st === 'loading' ? '連線中…' : '用 Google 登入'}</button>
+      ${err}</section>`;
+  }
+  return `<section class="panel"><h3>雲端同步</h3>
+    <div class="sync-user">${u.photoURL ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer">` : ''}<div><b>${esc(u.displayName || '')}</b><div class="muted small">${esc(u.email || '')}</div></div></div>
+    <div class="sync-line"><span class="sync-dot ${st}" data-sync-dot></span><span data-sync-text>${Sync.statusText()}</span><span data-sync-time>${Sync.meta.lastSync ? '最後同步：' + fmtDate(Sync.meta.lastSync) : ''}</span></div>
+    <p class="muted small">在手機和電腦都用這個 Google 帳號登入，進度就會自動同步。</p>
+    <div class="actions" style="margin-bottom:0"><button class="btn sm" data-act="sync-now">立即同步</button><button class="btn sm ghost" data-act="sync-logout">登出</button></div>
+    ${err}</section>`;
+}
+
 /* ---------- 路由 ---------- */
 const APP = $('#app');
 function route(){
@@ -530,6 +893,11 @@ window.addEventListener('hashchange', render);
 function render(){
   const r = route();
   const key = r.a + '/' + (r.b || '');
+  if (Sync.pendingRefresh && r.a !== 'study' && r.a !== 'test') {
+    // 背單字或考試時收到其他裝置的更新，現在才套用到畫面
+    Sync.pendingRefresh = false;
+    useBank(allBanks().some(b => b.id === S.cur) ? S.cur : BUILTIN[0].id);
+  }
   let html;
   switch (r.a) {
     case 'group': {
@@ -583,11 +951,12 @@ function rowHtml(w, o){
     <button class="ib star${st ? ' on' : ''}" data-act="star" data-id="${w.id}" aria-pressed="${st}" title="標記／取消不熟">${IC.star}</button>
     <button class="ib say" data-act="say" data-id="${w.id}" title="播放發音">${IC.vol}</button>
     <div class="rbody${o.mask ? ' mask' : ''}"${o.mask ? ' data-act="reveal"' : ''}>
-      <div class="rhead"><span class="w">${esc(w.w)}</span><span class="pos">${esc(w.pos)}</span>${o.showGroup ? `<a class="gbadge" href="#/group/${w.g}">第${pad(w.g)}組</a>` : ''}${o.showMiss && miss ? `<span class="miss">錯 ${miss} 次</span>` : ''}</div>
+      <div class="rhead"><span class="w">${esc(w.w)}</span><span class="pos">${esc(w.pos)}</span>${o.showGroup ? `<a class="gbadge" href="#/group/${w.g}">${esc(gTag(w.g))}</a>` : ''}${o.showMiss && miss ? `<span class="miss">錯 ${miss} 次</span>` : ''}</div>
       <div class="zh">${esc(w.zh)}</div>
       ${w.def ? `<div class="def">${esc(w.def)}</div>` : ''}
+      ${w.note ? `<div class="note">${esc(w.note)}</div>` : ''}
     </div>
-    <span class="rank">#${w.id}</span>
+    ${B.gnames ? '' : `<span class="rank">#${w.id}</span>`}
   </li>`;
 }
 function studyOpts(){
@@ -635,7 +1004,8 @@ function viewHome(){
     const sn = ws.filter(w => isStar(w.id)).length;
     const done = P.done[g], last = P.last[g];
     return `<a class="gcard${done ? ' done' : ''}" href="#/group/${g}">
-      <div class="gtop"><span class="gnum">${pad(g)}</span><span class="grange">#${ws[0].id}–${ws[ws.length-1].id}</span></div>
+      <div class="gtop"><span class="gnum">${pad(g)}</span><span class="grange">${B.gnames ? `${ws.length} 個` : `#${ws[0].id}–${ws[ws.length-1].id}`}</span></div>
+      ${B.gnames ? `<div class="gname">${esc(B.gnames[g])}</div>` : ''}
       <div class="gprev">${ws.slice(0, 3).map(w => esc(w.w)).join(' · ')}${ws.length > 3 ? ' …' : ''}</div>
       <div class="gtags">${done ? '<span class="tag ok">✓ 學過</span>' : ''}${sn ? `<span class="tag star">★ ${sn}</span>` : ''}${last != null ? `<span class="tag">測驗 ${last}%</span>` : ''}${!done && !sn && last == null ? '<span class="tag">未開始</span>' : ''}</div>
     </a>`;
@@ -643,15 +1013,16 @@ function viewHome(){
   return `
   <section class="hero">
     <div class="hero-top">
-      <div><h1>${esc(B.name)}</h1><p class="muted">${B.source ? esc(B.source) + '・' : ''}${NG} 組 × ${B.size} 字（共 ${WORDS.length} 字）</p></div>
+      <div><h1>${esc(B.name)}</h1><p class="muted">${B.source ? esc(B.source) + '・' : ''}${B.gnames ? `${NG} 個主題（共 ${WORDS.length} 個術語）` : `${NG} 組 × ${B.size} 字（共 ${WORDS.length} 字）`}</p></div>
       <a class="btn sm" href="#/banks">切換／新增單字庫</a>
     </div>
     <div class="stats">
-      <div class="stat"><b>${doneN}<small>/${NG}</small></b><span>學過的組</span></div>
-      <div class="stat star"><b>${starN}</b><span>不熟單字</span></div>
+      <div class="stat"><b>${doneN}<small>/${NG}</small></b><span>${B.gnames ? '學過的主題' : '學過的組'}</span></div>
+      <div class="stat star"><b>${starN}</b><span>${B.gnames ? '不熟術語' : '不熟單字'}</span></div>
       <div class="stat"><b>${P.hist.length}</b><span>考試次數</span></div>
     </div>
-    ${next ? `<div><button class="btn primary" data-act="go" data-href="#/group/${next}">${doneN ? '繼續' : '開始'}：第 ${next} 組 →</button></div>` : ''}
+    ${next ? `<div><button class="btn primary" data-act="go" data-href="#/group/${next}">${doneN ? '繼續' : '開始'}：${esc(gName(next))} →</button></div>` : ''}
+    ${syncLineHtml()}
   </section>
   ${dailyHtml()}
   <div class="search"><input id="search" type="search" placeholder="查單字（輸入英文或中文）" autocomplete="off"></div>
@@ -680,20 +1051,20 @@ function viewGroup(g){
   return `
   <div class="crumb"><a href="#/">← 所有組別</a></div>
   <div class="ghead">
-    <div><h2>第 ${g} 組</h2><p class="muted">#${ws[0].id}–#${ws[ws.length-1].id}・${ws.length} 字${P.done[g] ? '・<span class="okc">✓ 學過</span>' : ''}${P.last[g] != null ? `・最近測驗 ${P.last[g]}%` : ''}</p></div>
-    <div class="gnav">${g > 1 ? `<a class="btn ghost sm" href="#/group/${g-1}">‹ 上一組</a>` : ''}${g < NG ? `<a class="btn ghost sm" href="#/group/${g+1}">下一組 ›</a>` : ''}</div>
+    <div><h2>${esc(gName(g))}</h2><p class="muted">${B.gnames ? `第 ${g} 個主題・${ws.length} 個術語` : `#${ws[0].id}–#${ws[ws.length-1].id}・${ws.length} 字`}${P.done[g] ? '・<span class="okc">✓ 學過</span>' : ''}${P.last[g] != null ? `・最近測驗 ${P.last[g]}%` : ''}</p></div>
+    <div class="gnav">${g > 1 ? `<a class="btn ghost sm" href="#/group/${g-1}">‹ 上一${B.gnames ? '個' : '組'}</a>` : ''}${g < NG ? `<a class="btn ghost sm" href="#/group/${g+1}">下一${B.gnames ? '個' : '組'} ›</a>` : ''}</div>
   </div>
   <div class="actions">
     <button class="btn primary" data-act="study-group" data-g="${g}">閃卡學習</button>
     <button class="btn star" data-act="study-group-star" data-g="${g}"${starN ? '' : ' disabled'}>只練不熟（<span data-starcount="${g}">${starN}</span>）</button>
-    <button class="btn" data-act="quiz-group" data-g="${g}">考這一組</button>
+    <button class="btn" data-act="quiz-group" data-g="${g}">${B.gnames ? '考這個主題' : '考這一組'}</button>
   </div>
   ${studyOpts()}
   <div class="toolbar">
     <label class="check"><input type="checkbox" data-set="hideZh"${S.set.hideZh ? ' checked' : ''}> 遮住中文（點一下顯示）</label>
     <div class="seg"><button class="${groupFilter === 'all' ? 'on' : ''}" data-act="gfilter" data-v="all">全部</button><button class="${groupFilter === 'star' ? 'on' : ''}" data-act="gfilter" data-v="star">只看不熟</button></div>
   </div>
-  <ul class="list">${list.map(w => rowHtml(w, {mask:S.set.hideZh, showMiss:true})).join('') || '<li class="empty">這一組目前沒有標記不熟的單字</li>'}</ul>`;
+  <ul class="list">${list.map(w => rowHtml(w, {mask:S.set.hideZh, showMiss:true})).join('') || `<li class="empty">這${B.gnames ? '個主題' : '一組'}目前沒有標記不熟的單字</li>`}</ul>`;
 }
 
 /* ---------- 不熟單字頁 ---------- */
@@ -722,11 +1093,11 @@ function viewReview(){
   </div>
   ${studyOpts()}
   <div class="toolbar">
-    <select id="reviewGroup" aria-label="篩選組別"><option value="0">全部組別</option>${Object.keys(gcount).map(Number).sort((a, b) => a - b).map(g => `<option value="${g}"${reviewGroup === g ? ' selected' : ''}>第 ${pad(g)} 組（${gcount[g]}）</option>`).join('')}</select>
+    <select id="reviewGroup" aria-label="篩選組別"><option value="0">${B.gnames ? '全部主題' : '全部組別'}</option>${Object.keys(gcount).map(Number).sort((a, b) => a - b).map(g => `<option value="${g}"${reviewGroup === g ? ' selected' : ''}>${esc(gTag(g))}（${gcount[g]}）</option>`).join('')}</select>
     <div class="seg"><button class="${reviewSort === 'rank' ? 'on' : ''}" data-act="rsort" data-v="rank">依順序</button><button class="${reviewSort === 'miss' ? 'on' : ''}" data-act="rsort" data-v="miss">錯最多次</button></div>
     <label class="check"><input type="checkbox" data-set="hideZh"${S.set.hideZh ? ' checked' : ''}> 遮住中文</label>
   </div>
-  <ul class="list">${ws.map(w => rowHtml(w, {mask:S.set.hideZh, showGroup:true, showMiss:true})).join('') || '<li class="empty">這一組沒有不熟的單字</li>'}</ul>
+  <ul class="list">${ws.map(w => rowHtml(w, {mask:S.set.hideZh, showGroup:true, showMiss:true})).join('') || `<li class="empty">這${B.gnames ? '個主題' : '一組'}沒有不熟的單字</li>`}</ul>
   <div class="actions" style="justify-content:flex-end"><button class="btn danger sm" data-act="clear-stars">清除全部不熟標記</button></div>`;
 }
 
@@ -808,7 +1179,8 @@ function viewStudy(){
   const back = `<div class="c-word sm">${esc(w.w)}<button class="ib say" data-act="say" data-id="${w.id}" title="播放發音">${IC.vol}</button></div>
     <div class="c-pos">${esc(w.pos)}</div>
     <div class="c-zh">${esc(w.zh)}</div>
-    ${w.def ? `<div class="c-def">${esc(w.def)} <button class="ib say sm" data-act="say-def" data-id="${w.id}" title="唸英英解釋">${IC.vol}</button></div>` : ''}`;
+    ${w.def ? `<div class="c-def">${esc(w.def)}${HAS_CJK.test(w.def) ? '' : ` <button class="ib say sm" data-act="say-def" data-id="${w.id}" title="唸英英解釋">${IC.vol}</button>`}</div>` : ''}
+    ${w.note ? `<div class="c-note">${esc(w.note)}</div>` : ''}`;
   return `
   <div class="sbar">
     <button class="btn ghost sm" data-act="go" data-href="${s.back}">← 返回</button>
@@ -842,7 +1214,7 @@ function viewStudyDone(){
     const moreAvail = starIds().filter(id => !d.ids.includes(id)).length;
     extra = `<button class="btn" data-act="daily-quiz">考今天這 ${d.ids.length} 個</button>${dailyComplete() && moreAvail ? `<button class="btn" data-act="daily-more">加碼再 ${Math.min(S.set.dailyN || 10, moreAvail)} 個</button>` : ''}`;
   } else if (s.g) {
-    extra = `<button class="btn" data-act="quiz-group" data-g="${s.g}">考這一組</button>`;
+    extra = `<button class="btn" data-act="quiz-group" data-g="${s.g}">${B.gnames ? '考這個主題' : '考這一組'}</button>`;
   }
   return `
   <div class="done-card">
@@ -866,6 +1238,11 @@ function qsPool(){
 }
 function groupsLabel(gs){
   if (!gs.length) return '';
+  if (B.gnames) {
+    if (gs.length === NG) return `全部 ${NG} 個主題`;
+    if (gs.length <= 2) return gs.map(g => B.gnames[g]).join('、');
+    return `${gs.length} 個主題`;
+  }
   if (gs.length === 1) return `第 ${pad(gs[0])} 組`;
   if (gs.length === NG) return `全部 ${NG} 組`;
   const contiguous = gs[gs.length - 1] - gs[0] + 1 === gs.length;
@@ -874,10 +1251,14 @@ function groupsLabel(gs){
   return `${gs.length} 組`;
 }
 function distractors(ans){
-  // 優先用詞性完全相同的字當干擾選項，避免從詞性猜出答案
+  // 依主題分組的單字庫：優先用同主題的術語當干擾選項（比較考得出來有沒有分清楚）
+  // 其他單字庫：優先用詞性完全相同的字，避免從詞性猜出答案
   const exact = POS_EXACT[ans.pos] || [];
   const prim = POS_POOL[ans.pos.split('/')[0] || '?'] || [];
-  const tiers = [exact.length >= 12 ? exact : null, prim.length >= 30 ? prim : null, WORDS].filter(Boolean);
+  const same = GW[ans.g] || [];
+  const tiers = (B.gnames
+    ? [same.length >= 6 ? same : null, WORDS]
+    : [exact.length >= 12 ? exact : null, prim.length >= 30 ? prim : null, WORDS]).filter(Boolean);
   const out = [], seen = new Set([ans.zh]), seenW = new Set([ans.w]);
   for (const src of tiers) {
     for (let t = 0; out.length < 3 && t < 300; t++) {
@@ -926,6 +1307,12 @@ function quizNext(){
   render();
 }
 const canSpeakQ = q => q.answered || q.t === 'en2zh' || q.t === 'listen';
+// 拼字題可接受的答案：「CPU (Central Processing Unit)」拼 CPU 或 Central Processing Unit 都算對
+const PAREN = /^(.*?)\s*\(([^)]*)\)\s*$/;
+function spellAnswers(w){
+  const m = w.w.match(PAREN);
+  return [w.w].concat(m ? [m[1], m[2]] : []).map(norm).filter(Boolean);
+}
 
 function viewQuizSetup(){
   const st = S.set;
@@ -933,7 +1320,7 @@ function viewQuizSetup(){
   const starN = starIds().length;
   const cnt = st.qsCount === 0 ? pool.length : Math.min(st.qsCount, pool.length);
   const chips = Array.from({length:NG}, (_, i) => i + 1).map(g =>
-    `<button class="chip${!P.qsStar && P.qsGroups.includes(g) ? ' on' : ''}${P.done[g] ? ' done' : ''}" data-act="qs-group" data-g="${g}" title="第 ${g} 組${P.done[g] ? '（學過）' : ''}">${pad(g)}</button>`).join('');
+    `<button class="chip${B.gnames ? ' wide' : ''}${!P.qsStar && P.qsGroups.includes(g) ? ' on' : ''}${P.done[g] ? ' done' : ''}" data-act="qs-group" data-g="${g}" title="${esc(gName(g))}${P.done[g] ? '（學過）' : ''}">${B.gnames ? esc(B.gnames[g]) : pad(g)}</button>`).join('');
   const types = Object.keys(TYPE_LABEL).map(k => `<button class="${st.qsType === k ? 'on' : ''}" data-act="qs-type" data-v="${k}">${TYPE_LABEL[k]}</button>`).join('');
   const counts = [10, 20, 30, 50, 0].map(c => `<button class="${st.qsCount === c ? 'on' : ''}" data-act="qs-count" data-v="${c}">${c || '全部'}</button>`).join('');
   const hist = P.hist.slice(0, 10).map(h => {
@@ -946,7 +1333,7 @@ function viewQuizSetup(){
   <section class="panel"><h3>範圍</h3>
     <div class="chips" style="margin-bottom:10px">
       <button class="chip wide star-chip${P.qsStar ? ' on' : ''}" data-act="qs-star"${starN ? '' : ' disabled'}>★ 不熟單字（${starN}）</button>
-      <button class="chip wide" data-act="qs-done"${Object.keys(P.done).length ? '' : ' disabled'}>學過的組</button>
+      <button class="chip wide" data-act="qs-done"${Object.keys(P.done).length ? '' : ' disabled'}>${B.gnames ? '學過的主題' : '學過的組'}</button>
       <button class="chip wide" data-act="qs-all">全選</button>
       <button class="chip wide" data-act="qs-none">清除</button>
     </div>
@@ -970,7 +1357,7 @@ function viewQuiz(){
   let prompt;
   if (q.t === 'en2zh') prompt = `<div class="q-word">${esc(w.w)}</div>${sayBtn}`;
   else if (q.t === 'listen') prompt = q.answered ? `<div class="q-word">${esc(w.w)}</div>${sayBtn}` : `<button class="listen-btn" data-act="say" data-id="${w.id}">${IC.vol}<span>再聽一次</span></button>`;
-  else prompt = `<div class="q-pos">${esc(w.pos)}</div><div class="q-zh">${esc(w.zh)}</div>`;
+  else prompt = `<div class="q-pos">${esc(w.pos)}</div><div class="q-zh">${esc(w.zh)}</div>${w.def && HAS_CJK.test(w.def) ? `<div class="c-def">${esc(w.def)}</div>` : ''}`;
 
   let body = '';
   if (q.t === 'spell') {
@@ -979,7 +1366,7 @@ function viewQuiz(){
     } else {
       const letters = w.w.replace(/[^a-z]/gi, '').length;
       const hint = w.w.split('').map((c, i) => i === 0 ? c : /[a-z]/i.test(c) ? '_' : c).join(' ');
-      prompt += `<div class="spell-hint">${esc(hint)} <span class="muted small">（${letters} 個字母）</span></div>
+      prompt += `<div class="spell-hint">${esc(hint)} <span class="muted small">（${letters} 個字母${PAREN.test(w.w) ? '；括號內外擇一拼對即可' : ''}）</span></div>
         <form class="spell" data-form="spell"><input id="spellIn" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="輸入英文單字" enterkeyhint="done" aria-label="輸入英文單字"><button class="btn primary" type="submit">確認</button></form>
         <div class="spell-more"><button class="btn ghost sm" data-act="say" data-id="${w.id}">${IC.vol} 聽發音提示</button><button class="btn ghost sm" data-act="spell-giveup">不會，看答案</button></div>`;
     }
@@ -1119,14 +1506,15 @@ function viewBanks(){
   const list = allBanks().map(b => {
     const p = S.banks[b.id];
     const size = b.size || 50;
-    const ng = Math.ceil(b.words.length / size);
+    const named = Array.isArray(b.groups) && b.groups.length;
+    const ng = named ? b.groups.length : Math.ceil(b.words.length / size);
     const sn = p ? Object.keys(p.star || {}).length : 0;
     const dn = p ? Object.keys(p.done || {}).length : 0;
     const cur = b.id === B.id;
     return `<li class="bank${cur ? ' cur' : ''}">
       <div class="bank-main">
         <div class="bank-title">${esc(b.name)}${cur ? ' <span class="tag ok">使用中</span>' : ''}${b.builtin ? ' <span class="tag">內建</span>' : ''}</div>
-        <div class="muted small">${b.words.length} 字・${ng} 組 × ${size} 字${dn ? `・學過 ${dn} 組` : ''}${sn ? `・不熟 ${sn}` : ''}</div>
+        <div class="muted small">${named ? `${b.words.length} 個術語・${ng} 個主題` : `${b.words.length} 字・${ng} 組 × ${size} 字`}${dn ? `・學過 ${dn} ${named ? '個主題' : '組'}` : ''}${sn ? `・不熟 ${sn}` : ''}</div>
       </div>
       <div class="bank-act">${cur ? '' : `<button class="btn sm primary" data-act="bank-use" data-b="${esc(b.id)}">使用這個</button>`}${b.builtin ? '' : `<button class="btn sm danger" data-act="bank-del" data-b="${esc(b.id)}">刪除</button>`}</div>
     </li>`;
@@ -1162,7 +1550,7 @@ take off	v.	起飛
 reservation, n., 預約；訂位
 deadline 截止期限</pre>
     </details>
-    <p class="muted small" style="margin:12px 0 0">新增的單字庫存在這台裝置的瀏覽器裡。要在別的裝置使用，到「設定 → 匯出進度」備份後，在另一台匯入（單字庫會一起帶過去）。</p>
+    <p class="muted small" style="margin:12px 0 0">${Sync.user ? '已開啟雲端同步，新增的單字庫會自動出現在你其他登入的裝置。' : '新增的單字庫存在這台裝置的瀏覽器裡。到「設定」用 Google 登入雲端同步，就能在手機和電腦都看到；或用「匯出進度」把檔案帶到另一台匯入。'}</p>
   </section>`;
 }
 
@@ -1172,6 +1560,7 @@ function viewSettings(){
   const cur = TTS.pick();
   return `
   <h2 style="margin-bottom:14px">設定</h2>
+  ${syncPanelHtml()}
   <section class="panel"><h3>單字庫</h3>
     <div class="actions" style="margin:0;align-items:center"><span>目前使用：<b>${esc(B.name)}</b></span><a class="btn sm" href="#/banks">切換／新增單字庫</a></div>
   </section>
@@ -1195,7 +1584,7 @@ function viewSettings(){
     <p class="muted small" style="margin:0">從不熟單字裡，優先挑最久沒在今日複習出現過、錯最多次的。在今日複習按「記得」會把單字移出不熟清單。</p>
   </section>
   <section class="panel"><h3>進度備份</h3>
-    <p class="muted small" style="margin-top:0">進度和自己新增的單字庫都存在這個瀏覽器裡。換手機、換瀏覽器或清除瀏覽資料前，先匯出備份，之後在新的地方匯入就能接著用。</p>
+    <p class="muted small" style="margin-top:0">${Sync.user ? '已開啟雲端同步，進度會自動備份到你的 Google 帳號。這裡的匯出是額外的檔案備份。' : '進度和自己新增的單字庫都存在這個瀏覽器裡。換手機、換瀏覽器或清除瀏覽資料前，先匯出備份，之後在新的地方匯入就能接著用（或在上面登入雲端同步）。'}</p>
     <div class="actions" style="margin-bottom:0"><button class="btn" data-act="export">匯出進度</button><button class="btn" data-act="import">匯入進度</button><button class="btn danger" data-act="reset">清除「${esc(B.name)}」的進度</button></div>
   </section>
   <section class="panel"><h3>鍵盤快捷鍵</h3>
@@ -1260,8 +1649,8 @@ const ACT = {
   setfront: t => { S.set.front = t.dataset.v; save(); render(); },
   'clear-stars': () => { if (confirm('確定要清除全部不熟標記嗎？錯誤次數紀錄會保留。')) { P.star = {}; save(); render(); } },
 
-  'study-group': t => { const g = +t.dataset.g; startStudy(GW[g].map(w => w.id), `第 ${g} 組`, `#/group/${g}`, {g, full:true}); },
-  'study-group-star': t => { const g = +t.dataset.g; startStudy(GW[g].filter(w => isStar(w.id)).map(w => w.id), `第 ${g} 組・不熟`, `#/group/${g}`, {g}); },
+  'study-group': t => { const g = +t.dataset.g; startStudy(GW[g].map(w => w.id), gName(g), `#/group/${g}`, {g, full:true}); },
+  'study-group-star': t => { const g = +t.dataset.g; startStudy(GW[g].filter(w => isStar(w.id)).map(w => w.id), `${gName(g)}・不熟`, `#/group/${g}`, {g}); },
   'study-review': () => startStudy(reviewList().map(w => w.id), '不熟單字', '#/review'),
   'daily-study': () => {
     const left = dailyLeft();
@@ -1333,6 +1722,9 @@ const ACT = {
     useBank(b.id); save(); go('#/');
   },
 
+  'sync-login': () => Sync.signIn(),
+  'sync-logout': () => Sync.signOut(),
+  'sync-now': () => Sync.syncNow(),
   export: () => exportData(),
   import: () => $('#importFile').click(),
   reset: () => {
@@ -1356,7 +1748,7 @@ document.addEventListener('submit', e => {
   const inp = f.querySelector('input');
   const v = inp.value.trim();
   if (!v) { inp.focus(); return; }
-  quizAnswer(norm(v) === norm(BY_ID.get(q.id).w), {input:v});
+  quizAnswer(spellAnswers(BY_ID.get(q.id)).includes(norm(v)), {input:v});
 });
 document.addEventListener('change', e => {
   const t = e.target;
@@ -1429,7 +1821,9 @@ document.addEventListener('keydown', e => {
 });
 
 useBank(S.cur);
+Sync.initLocal();
 render();
+Sync.init();
 })();
 </script>
 </body>
