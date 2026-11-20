@@ -24,6 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "src" / "template.html"
 OUT = ROOT / "index.html"
 PLACEHOLDER = "/*__BANKS__*/[]"
+FB_PLACEHOLDER = "/*__FIREBASE__*/null"
 
 
 def main() -> int:
@@ -59,7 +60,15 @@ def main() -> int:
     if PLACEHOLDER not in html:
         sys.exit("template.html 找不到資料插入點")
     data = json.dumps(banks, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    OUT.write_text(html.replace(PLACEHOLDER, data), encoding="utf-8", newline="\n")
+    html = html.replace(PLACEHOLDER, data)
+
+    # 雲端同步：有 firebase-config.json 才開啟（這組設定本來就是公開的，安全性靠 firestore.rules）
+    fb = ROOT / "firebase-config.json"
+    if fb.exists() and FB_PLACEHOLDER in html:
+        cfg = json.loads(fb.read_text(encoding="utf-8"))
+        html = html.replace(FB_PLACEHOLDER, json.dumps(cfg, separators=(",", ":")))
+        print(f"  雲端同步：Firebase 專案 {cfg.get('projectId')}")
+    OUT.write_text(html, encoding="utf-8", newline="\n")
     print(f"已輸出 {OUT.name}（{OUT.stat().st_size // 1024} KB）")
     return 0
 

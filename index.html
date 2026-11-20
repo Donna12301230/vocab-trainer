@@ -604,7 +604,7 @@ function resolveConflict(key, localJson, remote){
 function hashStr(s){ let h = 5381; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0; return (h >>> 0) || 1; }
 /* SYNC-CORE-END */
 
-const FB_CONFIG = /*__FIREBASE__*/null;
+const FB_CONFIG = {"apiKey":"AIzaSyB_Zjfh6IHg8z_WaicBVADzjo0t7t3kAos","authDomain":"vocab-trainer-7716.firebaseapp.com","projectId":"vocab-trainer-7716","storageBucket":"vocab-trainer-7716.firebasestorage.app","messagingSenderId":"988782867968","appId":"1:988782867968:web:4e5e9689f88483af420ae5"};
 const FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 const SITE_URL = 'https://donna12301230.github.io/vocab-trainer/';
 const SYNC_KEY = 'vocab-sync-v1';
@@ -614,7 +614,9 @@ const IC_GOOGLE = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC1
 function localUnits(scope){
   const m = {};
   if (scope !== 'banks') {
-    m.settings = JSON.stringify({set:S.set, cur:S.cur});
+    // 語音選擇每台裝置不同，不同步
+    const set = Object.assign({}, S.set); delete set.voice;
+    m.settings = JSON.stringify({set, cur:S.cur});
     for (const id in S.banks) m['p_' + id] = JSON.stringify(S.banks[id]);
   }
   if (scope !== 'state') for (const b of CUSTOM) m['b_' + b.id] = JSON.stringify(b);
@@ -747,11 +749,11 @@ const Sync = {
     if (changed) this.afterRemote();
     this.saveMeta();
     if (toPush.length) this.pushKeys([...new Set(toPush)]);
-    this.paint(!changed && toPush.length === 0);
+    this.paint();
   },
   applyUnit(k, json){
     if (k === 'settings') {
-      if (json) { const o = JSON.parse(json); S.set = Object.assign(defaults().set, o.set || {}); if (o.cur) S.cur = o.cur; }
+      if (json) { const o = JSON.parse(json); S.set = Object.assign(defaults().set, o.set || {}, {voice:S.set.voice}); if (o.cur) S.cur = o.cur; }
       return;
     }
     const id = k.slice(2);

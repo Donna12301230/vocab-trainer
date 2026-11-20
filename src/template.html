@@ -614,7 +614,9 @@ const IC_GOOGLE = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC1
 function localUnits(scope){
   const m = {};
   if (scope !== 'banks') {
-    m.settings = JSON.stringify({set:S.set, cur:S.cur});
+    // 語音選擇每台裝置不同，不同步
+    const set = Object.assign({}, S.set); delete set.voice;
+    m.settings = JSON.stringify({set, cur:S.cur});
     for (const id in S.banks) m['p_' + id] = JSON.stringify(S.banks[id]);
   }
   if (scope !== 'state') for (const b of CUSTOM) m['b_' + b.id] = JSON.stringify(b);
@@ -747,11 +749,11 @@ const Sync = {
     if (changed) this.afterRemote();
     this.saveMeta();
     if (toPush.length) this.pushKeys([...new Set(toPush)]);
-    this.paint(!changed && toPush.length === 0);
+    this.paint();
   },
   applyUnit(k, json){
     if (k === 'settings') {
-      if (json) { const o = JSON.parse(json); S.set = Object.assign(defaults().set, o.set || {}); if (o.cur) S.cur = o.cur; }
+      if (json) { const o = JSON.parse(json); S.set = Object.assign(defaults().set, o.set || {}, {voice:S.set.voice}); if (o.cur) S.cur = o.cur; }
       return;
     }
     const id = k.slice(2);
